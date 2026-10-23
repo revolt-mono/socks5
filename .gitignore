@@ -1,0 +1,6 @@
+# local dev
+.agents
+.claude
+.codex
+.mcp.json
+refs

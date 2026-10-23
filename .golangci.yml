@@ -1,0 +1,9 @@
+version: "2"
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        - (net.Conn).Close
+        - (net.Listener).Close
+        - (*net.conn).Close
+        - (*net.TCPConn).CloseWrite
