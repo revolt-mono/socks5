@@ -122,20 +122,11 @@ func domainTarget(host string, port uint16) []byte {
 // request sends cmd for target and returns the reply code and bound address.
 func request(t *testing.T, conn net.Conn, cmd byte, target []byte) (byte, netip.AddrPort) {
 	t.Helper()
-	head := exchange(t, conn, append([]byte{5, cmd, 0}, target...), 4)
-	if head[0] != 5 {
-		t.Fatalf("reply version = %d", head[0])
+	reply := exchange(t, conn, append([]byte{5, cmd, 0}, target...), 10)
+	if reply[0] != 5 || reply[3] != 1 {
+		t.Fatalf("reply header = %v, want version 5 and an ipv4 bound address", reply[:4])
 	}
-	size := map[byte]int{1: 4, 4: 16}[head[3]]
-	if size == 0 {
-		t.Fatalf("reply atyp = %d", head[3])
-	}
-	rest := make([]byte, size+2)
-	if _, err := io.ReadFull(conn, rest); err != nil {
-		t.Fatal(err)
-	}
-	ip, _ := netip.AddrFromSlice(rest[:size])
-	return head[1], netip.AddrPortFrom(ip, binary.BigEndian.Uint16(rest[size:]))
+	return reply[1], netip.AddrPortFrom(netip.AddrFrom4([4]byte(reply[4:8])), binary.BigEndian.Uint16(reply[8:]))
 }
 
 // associate opens a udp association announcing 0.0.0.0:0 and returns the relay address.

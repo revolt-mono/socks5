@@ -147,15 +147,10 @@ func readAddress(r io.Reader) (address, error) {
 	return a, nil
 }
 
+// appendAddress encodes an ipv4 address; the server only ever reports its own sockets or ipv4 reply sources.
 func appendAddress(b []byte, a address) []byte {
-	if a.domain != "" {
-		b = append(b, atypDomain, byte(len(a.domain)))
-		b = append(b, a.domain...)
-	} else {
-		v4 := a.ip.As4()
-		b = append(b, atypIPv4)
-		b = append(b, v4[:]...)
-	}
+	v4 := a.ip.As4()
+	b = append(append(b, atypIPv4), v4[:]...)
 	return binary.BigEndian.AppendUint16(b, a.port)
 }
 

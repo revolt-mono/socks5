@@ -58,10 +58,12 @@ type udpRelay struct {
 	*server
 	peer netip.Addr
 
+	// mu guards what forward shares with relayReplies.
 	mu      sync.Mutex
 	client  netip.AddrPort
 	targets map[netip.AddrPort]struct{}
-	names   map[string]resolution // one lookup per domain for the whole association, failures included
+
+	names map[string]resolution // forward only; one lookup per domain for the whole association, failures included
 }
 
 type resolution struct {
@@ -134,15 +136,11 @@ func (r *udpRelay) resolveCached(ctx context.Context, a address) (netip.AddrPort
 	if a.domain == "" {
 		return r.resolve(ctx, a)
 	}
-	r.mu.Lock()
 	res, ok := r.names[a.domain]
-	r.mu.Unlock()
 	if !ok {
 		to, err := r.resolve(ctx, a)
 		res = resolution{ip: to.Addr(), err: err}
-		r.mu.Lock()
 		r.names[a.domain] = res
-		r.mu.Unlock()
 	}
 	if res.err != nil {
 		return netip.AddrPort{}, res.err
