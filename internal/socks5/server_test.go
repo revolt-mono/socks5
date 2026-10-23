@@ -489,6 +489,21 @@ func TestUDPOnlyRelaysBetweenPeerAndContactedTargets(t *testing.T) {
 	}
 }
 
+// domain targets resolve once per association; every datagram for the name still reaches the target.
+func TestUDPDomainTarget(t *testing.T) {
+	addr := start(t, allowAll())
+	echo := udpEcho(t)
+	conn := connected(t, addr)
+	client := udpClient(t)
+	relay := associate(t, conn)
+	for _, msg := range []string{"first", "second"} {
+		send(t, client, datagram(domainTarget("localhost", echo.Port()), msg), relay)
+		if payload, _ := receive(t, client, echo); string(payload) != msg {
+			t.Fatalf("payload = %q, want %q", payload, msg)
+		}
+	}
+}
+
 func TestUDPPrivateDestinationDenied(t *testing.T) {
 	addr := start(t, plain())
 	echo := udpEcho(t)
