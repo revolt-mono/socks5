@@ -1,8 +1,63 @@
 version: "2"
+
 linters:
+  default: standard
+  enable:
+    - asasalint
+    - bidichk
+    - copyloopvar
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - gocritic
+    - gosec
+    - intrange
+    - misspell
+    - modernize
+    - nilerr
+    - nilnesserr
+    - nolintlint
+    - perfsprint
+    - predeclared
+    - reassign
+    - revive
+    - sloglint
+    - thelper
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
   settings:
     errcheck:
       exclude-functions:
         - (net.Conn).Close
         - (net.Listener).Close
         - (*net.conn).Close
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+    gosec:
+      excludes:
+        - G104 # errcheck owns unchecked errors
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/revolt-mono/socks5

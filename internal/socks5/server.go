@@ -19,6 +19,7 @@ const (
 	maxCredentialLen = 255 // rfc 1929 wire limit
 )
 
+// Config is validated by Serve: Username and Password are required and at most 255 bytes each.
 type Config struct {
 	Username string
 	Password string

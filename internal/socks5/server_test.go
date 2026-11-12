@@ -33,7 +33,7 @@ func allowAll() socks5.Config {
 func serve(t *testing.T, ln net.Listener, cfg socks5.Config) {
 	t.Helper()
 	if cfg.Logger == nil {
-		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
 	done := make(chan error, 1)
 	go func() { done <- socks5.Serve(t.Context(), ln, cfg) }()
@@ -113,7 +113,8 @@ func ipTarget(ap netip.AddrPort) []byte {
 	return binary.BigEndian.AppendUint16(append([]byte{atyp}, ap.Addr().AsSlice()...), ap.Port())
 }
 
-func domainTarget(host string, port uint16) []byte {
+func localhostTarget(port uint16) []byte {
+	const host = "localhost"
 	b := append([]byte{3, byte(len(host))}, host...)
 	return binary.BigEndian.AppendUint16(b, port)
 }
@@ -418,7 +419,7 @@ func TestConnectDomain(t *testing.T) {
 	addr := start(t, allowAll())
 	echo := tcpEcho(t)
 	conn := connected(t, addr)
-	if rep, _ := request(t, conn, 1, domainTarget("localhost", echo.Port())); rep != 0 {
+	if rep, _ := request(t, conn, 1, localhostTarget(echo.Port())); rep != 0 {
 		t.Fatalf("reply = %d", rep)
 	}
 	if got := exchange(t, conn, []byte("ping"), 4); string(got) != "ping" {
@@ -445,7 +446,7 @@ func TestPrivateDestinationDenied(t *testing.T) {
 		t.Fatalf("reply = %d, want 2 (not allowed)", rep)
 	}
 	conn = connected(t, addr)
-	if rep, _ := request(t, conn, 1, domainTarget("localhost", echo.Port())); rep != 2 {
+	if rep, _ := request(t, conn, 1, localhostTarget(echo.Port())); rep != 2 {
 		t.Fatalf("domain reply = %d, want 2 (not allowed)", rep)
 	}
 }
@@ -464,7 +465,7 @@ func TestBadPassword(t *testing.T) {
 	if status := authenticate(t, conn, user, "wrong"); status == 0 {
 		t.Fatal("wrong password accepted")
 	}
-	if _, err := conn.Read(make([]byte, 1)); err != io.EOF {
+	if _, err := conn.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
 		t.Fatalf("connection stayed open after auth failure: %v", err)
 	}
 }
@@ -475,7 +476,7 @@ func TestNoAuthRejected(t *testing.T) {
 	if got := exchange(t, conn, []byte{5, 1, 0}, 2); !bytes.Equal(got, []byte{5, 0xFF}) {
 		t.Fatalf("method selection = %v", got)
 	}
-	if _, err := conn.Read(make([]byte, 1)); err != io.EOF {
+	if _, err := conn.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
 		t.Fatalf("connection stayed open: %v", err)
 	}
 }
@@ -542,7 +543,7 @@ func TestUDPDomainTarget(t *testing.T) {
 	client := udpClient(t)
 	relay := associate(t, conn)
 	for _, msg := range []string{"first", "second"} {
-		send(t, client, datagram(domainTarget("localhost", echo.Port()), msg), relay)
+		send(t, client, datagram(localhostTarget(echo.Port()), msg), relay)
 		if payload, _ := receive(t, client, echo); string(payload) != msg {
 			t.Fatalf("payload = %q, want %q", payload, msg)
 		}
@@ -639,7 +640,7 @@ func TestEgressIPv4Only(t *testing.T) {
 	}
 	// localhost resolves to ::1 as well, but only 127.0.0.1 may be dialed and nothing listens there.
 	conn = connected(t, addr)
-	if rep, _ := request(t, conn, 1, domainTarget("localhost", echo6.Port())); rep != 5 {
+	if rep, _ := request(t, conn, 1, localhostTarget(echo6.Port())); rep != 5 {
 		t.Fatalf("localhost reply = %d, want 5 (connection refused)", rep)
 	}
 
@@ -656,7 +657,7 @@ func TestCancelClosesSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := allowAll()
-	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg.Logger = slog.New(slog.DiscardHandler)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- socks5.Serve(ctx, ln, cfg) }()
