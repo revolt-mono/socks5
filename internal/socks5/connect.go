@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"sync"
 )
 
@@ -12,12 +13,12 @@ func (s *server) connect(ctx context.Context, sess *session, dst address) error 
 	conn := sess.conn
 	remote, err := s.dialer.DialContext(ctx, "tcp4", dst.String())
 	if err != nil {
-		return errors.Join(err, writeReply(conn, replyCode(err), address{}))
+		return errors.Join(err, writeReply(conn, replyCode(err), netip.AddrPort{}))
 	}
 	defer remote.Close()
 	defer context.AfterFunc(ctx, func() { remote.Close() })()
 
-	if err := writeReply(conn, repSucceeded, addressFrom(remote.LocalAddr())); err != nil {
+	if err := writeReply(conn, repSucceeded, addrPort(remote.LocalAddr())); err != nil {
 		return err
 	}
 

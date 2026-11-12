@@ -55,9 +55,9 @@ func (a address) String() string {
 	return netip.AddrPortFrom(a.ip, a.port).String()
 }
 
-func addressFrom(addr net.Addr) address {
+func addrPort(addr net.Addr) netip.AddrPort {
 	ap, _ := netip.ParseAddrPort(addr.String())
-	return address{ip: ap.Addr().Unmap(), port: ap.Port()}
+	return ap
 }
 
 func readByte(r io.Reader) (byte, error) {
@@ -66,7 +66,14 @@ func readByte(r io.Reader) (byte, error) {
 	return b[0], err
 }
 
-// readPrefixed reads a one-byte length followed by that many bytes.
+func readVersion(r io.Reader, want byte) error {
+	ver, err := readByte(r)
+	if err == nil && ver != want {
+		err = errVersion
+	}
+	return err
+}
+
 func readPrefixed(r io.Reader) ([]byte, error) {
 	n, err := readByte(r)
 	if err != nil {
@@ -78,15 +85,15 @@ func readPrefixed(r io.Reader) ([]byte, error) {
 }
 
 func readMethods(r io.Reader) ([]byte, error) {
-	if ver, err := readByte(r); err != nil || ver != version {
-		return nil, errors.Join(errVersion, err)
+	if err := readVersion(r, version); err != nil {
+		return nil, err
 	}
 	return readPrefixed(r)
 }
 
 func readUserPass(r io.Reader) (user, pass string, err error) {
-	if ver, err := readByte(r); err != nil || ver != userPassVersion {
-		return "", "", errors.Join(errVersion, err)
+	if err := readVersion(r, userPassVersion); err != nil {
+		return "", "", err
 	}
 	u, err := readPrefixed(r)
 	if err != nil {
@@ -147,16 +154,16 @@ func readAddress(r io.Reader) (address, error) {
 	return a, nil
 }
 
-// appendAddress encodes an ipv4 address; the server only ever reports its own sockets or ipv4 reply sources.
-func appendAddress(b []byte, a address) []byte {
-	v4 := a.ip.As4()
+// appendAddress encodes ap, which is always an ipv4 socket address: the server only reports its own sockets or ipv4 reply sources.
+func appendAddress(b []byte, ap netip.AddrPort) []byte {
+	v4 := ap.Addr().As4()
 	b = append(append(b, atypIPv4), v4[:]...)
-	return binary.BigEndian.AppendUint16(b, a.port)
+	return binary.BigEndian.AppendUint16(b, ap.Port())
 }
 
-func writeReply(w io.Writer, rep byte, bound address) error {
-	if !bound.ip.IsValid() {
-		bound.ip = netip.IPv4Unspecified()
+func writeReply(w io.Writer, rep byte, bound netip.AddrPort) error {
+	if !bound.IsValid() {
+		bound = netip.AddrPortFrom(netip.IPv4Unspecified(), 0)
 	}
 	_, err := w.Write(appendAddress([]byte{version, rep, 0x00}, bound))
 	return err
@@ -177,7 +184,7 @@ func parseDatagram(b []byte) (dst address, payload []byte, err error) {
 	return dst, b[len(b)-r.Len():], nil
 }
 
-func appendDatagram(b []byte, src address, payload []byte) []byte {
+func appendDatagram(b []byte, src netip.AddrPort, payload []byte) []byte {
 	b = appendAddress(append(b, 0x00, 0x00, 0x00), src)
 	return append(b, payload...)
 }

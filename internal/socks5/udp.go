@@ -17,18 +17,17 @@ const maxDatagram = 65535
 // Only replies from destinations the client contacted are relayed back.
 func (s *server) udpAssociate(ctx context.Context, sess *session, dst address) error {
 	conn := sess.conn
-	local := addressFrom(conn.LocalAddr())
-	front, err := net.ListenUDP("udp4", net.UDPAddrFromAddrPort(netip.AddrPortFrom(local.ip, 0)))
+	front, err := net.ListenUDP("udp4", net.UDPAddrFromAddrPort(netip.AddrPortFrom(addrPort(conn.LocalAddr()).Addr(), 0)))
 	if err != nil {
-		return errors.Join(err, writeReply(conn, repGeneralFailure, address{}))
+		return errors.Join(err, writeReply(conn, repGeneralFailure, netip.AddrPort{}))
 	}
 	defer front.Close()
 	back, err := net.ListenUDP("udp4", nil)
 	if err != nil {
-		return errors.Join(err, writeReply(conn, repGeneralFailure, address{}))
+		return errors.Join(err, writeReply(conn, repGeneralFailure, netip.AddrPort{}))
 	}
 	defer back.Close()
-	if err := writeReply(conn, repSucceeded, addressFrom(front.LocalAddr())); err != nil {
+	if err := writeReply(conn, repSucceeded, addrPort(front.LocalAddr())); err != nil {
 		return err
 	}
 	go func() {
@@ -39,9 +38,9 @@ func (s *server) udpAssociate(ctx context.Context, sess *session, dst address) e
 
 	r := &udpRelay{
 		server:  s,
-		peer:    addressFrom(conn.RemoteAddr()).ip,
+		peer:    addrPort(conn.RemoteAddr()).Addr(),
 		targets: map[netip.AddrPort]struct{}{},
-		names:   map[string]resolution{},
+		names:   map[string]netip.Addr{},
 	}
 	if dst.port != 0 {
 		r.client = netip.AddrPortFrom(r.peer, dst.port)
@@ -63,26 +62,20 @@ type udpRelay struct {
 	client  netip.AddrPort
 	targets map[netip.AddrPort]struct{}
 
-	names map[string]resolution // forward only; one lookup per domain for the whole association, failures included
+	names map[string]netip.Addr // forward only; one lookup per domain for the whole association, failures included
 }
 
-type resolution struct {
-	ip  netip.Addr
-	err error
-}
-
-// forward unwraps client datagrams read from front and sends them out of back.
-func (r *udpRelay) forward(ctx context.Context, front, back *net.UDPConn) (up int64, err error) {
+func (r *udpRelay) forward(ctx context.Context, front, back *net.UDPConn) (int64, error) {
+	var up int64
 	buf := make([]byte, maxDatagram)
 	for {
 		n, from, err := front.ReadFromUDPAddrPort(buf)
+		if errors.Is(err, net.ErrClosed) {
+			return up, nil
+		}
 		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return up, nil
-			}
 			return up, err
 		}
-		from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
 		r.mu.Lock()
 		if !r.client.IsValid() && from.Addr() == r.peer {
 			r.client = from
@@ -92,12 +85,12 @@ func (r *udpRelay) forward(ctx context.Context, front, back *net.UDPConn) (up in
 		if !fromClient {
 			continue
 		}
-		target, payload, err := parseDatagram(buf[:n])
+		dst, payload, err := parseDatagram(buf[:n])
 		if err != nil {
 			continue
 		}
-		to, err := r.resolveCached(ctx, target)
-		if err != nil {
+		to, ok := r.destination(ctx, dst)
+		if !ok {
 			continue
 		}
 		r.mu.Lock()
@@ -109,15 +102,14 @@ func (r *udpRelay) forward(ctx context.Context, front, back *net.UDPConn) (up in
 	}
 }
 
-// relayReplies wraps datagrams from contacted targets read from back and sends them to the client through front.
 func (r *udpRelay) relayReplies(back, front *net.UDPConn) (down int64) {
 	buf := make([]byte, maxDatagram)
+	var out []byte
 	for {
 		n, from, err := back.ReadFromUDPAddrPort(buf)
 		if err != nil {
 			return down
 		}
-		from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
 		r.mu.Lock()
 		_, contacted := r.targets[from]
 		client := r.client
@@ -125,25 +117,21 @@ func (r *udpRelay) relayReplies(back, front *net.UDPConn) (down int64) {
 		if !contacted {
 			continue
 		}
-		out := appendDatagram(nil, address{ip: from.Addr(), port: from.Port()}, buf[:n])
+		out = appendDatagram(out[:0], from, buf[:n])
 		if _, err := front.WriteToUDPAddrPort(out, client); err == nil {
 			down += int64(n)
 		}
 	}
 }
 
-func (r *udpRelay) resolveCached(ctx context.Context, a address) (netip.AddrPort, error) {
+func (r *udpRelay) destination(ctx context.Context, a address) (netip.AddrPort, bool) {
 	if a.domain == "" {
-		return r.resolve(ctx, a)
+		return netip.AddrPortFrom(a.ip, a.port), r.allowed(a.ip)
 	}
-	res, ok := r.names[a.domain]
+	ip, ok := r.names[a.domain]
 	if !ok {
-		to, err := r.resolve(ctx, a)
-		res = resolution{ip: to.Addr(), err: err}
-		r.names[a.domain] = res
+		ip = r.resolve(ctx, a.domain)
+		r.names[a.domain] = ip
 	}
-	if res.err != nil {
-		return netip.AddrPort{}, res.err
-	}
-	return netip.AddrPortFrom(res.ip, a.port), nil
+	return netip.AddrPortFrom(ip, a.port), ip.IsValid()
 }

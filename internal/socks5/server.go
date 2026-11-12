@@ -74,7 +74,7 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 		}
 		if err != nil {
 			delay = min(max(2*delay, 5*time.Millisecond), time.Second)
-			cfg.Logger.Warn("accept", "error", err.Error(), "retry_in", delay)
+			cfg.Logger.Warn("accept", "error", err, "retry_in", delay)
 			select {
 			case <-ctx.Done():
 			case <-time.After(delay):
@@ -82,7 +82,7 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 			continue
 		}
 		delay = 0
-		if len(clients) > 0 && !clients[addressFrom(conn.RemoteAddr()).ip] {
+		if len(clients) > 0 && !clients[addrPort(conn.RemoteAddr()).Addr()] {
 			conn.Close()
 			continue
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"slices"
 	"time"
 )
@@ -41,7 +42,7 @@ func (s *server) handle(ctx context.Context, conn net.Conn) {
 		"duration", time.Since(start).Round(time.Millisecond),
 	}
 	if err != nil {
-		s.cfg.Logger.Warn("session", append(attrs, "error", err.Error())...)
+		s.cfg.Logger.Warn("session", append(attrs, "error", err)...)
 		return
 	}
 	s.cfg.Logger.Info("session", attrs...)
@@ -57,7 +58,7 @@ func (s *server) run(ctx context.Context, sess *session) error {
 	}
 	cmd, dst, err := readRequest(conn)
 	if errors.Is(err, errAddrType) {
-		return errors.Join(err, writeReply(conn, repAddrTypeNotSupported, address{}))
+		return errors.Join(err, writeReply(conn, repAddrTypeNotSupported, netip.AddrPort{}))
 	}
 	if err != nil {
 		return err
@@ -76,7 +77,7 @@ func (s *server) run(ctx context.Context, sess *session) error {
 		return s.udpAssociate(ctx, sess, dst)
 	}
 	sess.cmd = fmt.Sprintf("0x%02x", cmd)
-	return errors.Join(errCommand, writeReply(conn, repCommandNotSupported, address{}))
+	return errors.Join(errCommand, writeReply(conn, repCommandNotSupported, netip.AddrPort{}))
 }
 
 func (s *server) authenticate(conn net.Conn) error {
@@ -84,7 +85,7 @@ func (s *server) authenticate(conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	if !slices.Contains(methods, byte(methodUserPass)) {
+	if !slices.Contains(methods, methodUserPass) {
 		_, err := conn.Write([]byte{version, methodNoAcceptable})
 		return errors.Join(errNoAuthMethod, err)
 	}

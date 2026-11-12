@@ -10,7 +10,6 @@ import (
 
 var errNotAllowed = errors.New("destination not allowed by ruleset")
 
-// allowed reports whether traffic may be sent to ip: without AllowPrivate only global unicast addresses outside rfc1918 pass.
 func (s *server) allowed(ip netip.Addr) bool {
 	return s.cfg.AllowPrivate || (ip.IsGlobalUnicast() && !ip.IsPrivate())
 }
@@ -27,21 +26,15 @@ func (s *server) control(_ context.Context, _, address string, _ syscall.RawConn
 	return nil
 }
 
-// resolve turns a udp destination into a permitted ipv4 ip:port.
-func (s *server) resolve(ctx context.Context, a address) (netip.AddrPort, error) {
-	ips := []netip.Addr{a.ip}
-	if a.domain != "" {
-		var err error
-		if ips, err = net.DefaultResolver.LookupNetIP(ctx, "ip4", a.domain); err != nil {
-			return netip.AddrPort{}, err
-		}
-	}
+// resolve returns the first permitted ipv4 address of host, or the zero Addr when the lookup fails or nothing is permitted.
+func (s *server) resolve(ctx context.Context, host string) netip.Addr {
+	ips, _ := net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
 	for _, ip := range ips {
 		if ip = ip.Unmap(); s.allowed(ip) {
-			return netip.AddrPortFrom(ip, a.port), nil
+			return ip
 		}
 	}
-	return netip.AddrPort{}, errNotAllowed
+	return netip.Addr{}
 }
 
 func replyCode(err error) byte {

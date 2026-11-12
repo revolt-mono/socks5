@@ -30,7 +30,6 @@ func allowAll() socks5.Config {
 	return socks5.Config{Username: user, Password: pass, AllowPrivate: true}
 }
 
-// serve runs Serve on ln for the test lifetime and checks that it returns cleanly after cancellation.
 func serve(t *testing.T, ln net.Listener, cfg socks5.Config) {
 	t.Helper()
 	if cfg.Logger == nil {
@@ -105,14 +104,13 @@ func connected(t *testing.T, addr string) net.Conn {
 	return conn
 }
 
-func ipv4Target(ap netip.AddrPort) []byte {
-	v4 := ap.Addr().As4()
-	return binary.BigEndian.AppendUint16(append([]byte{1}, v4[:]...), ap.Port())
-}
-
-func ipv6Target(ap netip.AddrPort) []byte {
-	v6 := ap.Addr().As16()
-	return binary.BigEndian.AppendUint16(append([]byte{4}, v6[:]...), ap.Port())
+// ipTarget encodes ap as an ipv4 target, or as an ipv6 target for any other address including ipv4-mapped ones.
+func ipTarget(ap netip.AddrPort) []byte {
+	atyp := byte(4)
+	if ap.Addr().Is4() {
+		atyp = 1
+	}
+	return binary.BigEndian.AppendUint16(append([]byte{atyp}, ap.Addr().AsSlice()...), ap.Port())
 }
 
 func domainTarget(host string, port uint16) []byte {
@@ -120,7 +118,6 @@ func domainTarget(host string, port uint16) []byte {
 	return binary.BigEndian.AppendUint16(b, port)
 }
 
-// request sends cmd for target and returns the reply code and bound address.
 func request(t *testing.T, conn net.Conn, cmd byte, target []byte) (byte, netip.AddrPort) {
 	t.Helper()
 	reply := exchange(t, conn, append([]byte{5, cmd, 0}, target...), 10)
@@ -130,10 +127,9 @@ func request(t *testing.T, conn net.Conn, cmd byte, target []byte) (byte, netip.
 	return reply[1], netip.AddrPortFrom(netip.AddrFrom4([4]byte(reply[4:8])), binary.BigEndian.Uint16(reply[8:]))
 }
 
-// associate opens a udp association announcing 0.0.0.0:0 and returns the relay address.
 func associate(t *testing.T, conn net.Conn) netip.AddrPort {
 	t.Helper()
-	rep, relay := request(t, conn, 3, ipv4Target(netip.MustParseAddrPort("0.0.0.0:0")))
+	rep, relay := request(t, conn, 3, ipTarget(netip.MustParseAddrPort("0.0.0.0:0")))
 	if rep != 0 {
 		t.Fatalf("udp associate reply = %d", rep)
 	}
@@ -162,7 +158,6 @@ func tcpEcho(t *testing.T) netip.AddrPort {
 	return netip.MustParseAddrPort(ln.Addr().String())
 }
 
-// udpServer answers every datagram on ip with reply(payload, from), skipping the test when ip cannot be bound.
 func udpServer(t *testing.T, ip netip.Addr, reply func([]byte, netip.AddrPort) []byte) netip.AddrPort {
 	t.Helper()
 	pc, err := net.ListenUDP("udp", net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip, 0)))
@@ -201,7 +196,6 @@ func udpClient(t *testing.T) *net.UDPConn {
 	return client
 }
 
-// datagram wraps payload in a socks5 udp header for target.
 func datagram(target []byte, payload string) []byte {
 	return append(append([]byte{0, 0, 0}, target...), payload...)
 }
@@ -213,7 +207,6 @@ func send(t *testing.T, client *net.UDPConn, out []byte, relay netip.AddrPort) {
 	}
 }
 
-// receive returns the payload and source of the next datagram the relay delivers for target.
 func receive(t *testing.T, client *net.UDPConn, target netip.AddrPort) ([]byte, netip.AddrPort) {
 	t.Helper()
 	buf := make([]byte, 65535)
@@ -221,7 +214,7 @@ func receive(t *testing.T, client *net.UDPConn, target netip.AddrPort) ([]byte, 
 	if err != nil {
 		t.Fatalf("no reply via relay for %v: %v", target, err)
 	}
-	header := datagram(ipv4Target(target), "")
+	header := datagram(ipTarget(target), "")
 	if !bytes.HasPrefix(buf[:n], header) {
 		t.Fatalf("reply = %v, want header %v", buf[:n], header)
 	}
@@ -238,7 +231,6 @@ func expectNoReply(t *testing.T, client *net.UDPConn) {
 	}
 }
 
-// lanIPv4 returns a non-loopback ipv4 address of this host, or skips.
 func lanIPv4(t *testing.T) netip.Addr {
 	t.Helper()
 	addrs, err := net.InterfaceAddrs()
@@ -255,7 +247,6 @@ func lanIPv4(t *testing.T) netip.Addr {
 	return netip.Addr{}
 }
 
-// flakyListener fails the first accept so Serve must keep going.
 type flakyListener struct {
 	net.Listener
 	failed bool
@@ -275,6 +266,27 @@ type logLines chan string
 func (l logLines) Write(p []byte) (int, error) {
 	l <- string(p)
 	return len(p), nil
+}
+
+func withLog(cfg socks5.Config) (socks5.Config, logLines) {
+	lines := make(logLines, 64)
+	cfg.Logger = slog.New(slog.NewTextHandler(lines, nil))
+	return cfg, lines
+}
+
+func awaitLog(t *testing.T, lines logLines, want string) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case line := <-lines:
+			if strings.Contains(line, want) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no log line containing %q", want)
+		}
+	}
 }
 
 func TestServeRequiresCredentials(t *testing.T) {
@@ -349,7 +361,7 @@ func TestServeSurvivesAcceptError(t *testing.T) {
 	}
 	serve(t, &flakyListener{Listener: ln}, allowAll())
 	conn := connected(t, ln.Addr().String())
-	if rep, _ := request(t, conn, 1, ipv4Target(tcpEcho(t))); rep != 0 {
+	if rep, _ := request(t, conn, 1, ipTarget(tcpEcho(t))); rep != 0 {
 		t.Fatalf("reply = %d", rep)
 	}
 }
@@ -358,13 +370,12 @@ func TestConnectEcho(t *testing.T) {
 	addr := start(t, allowAll())
 	echo := tcpEcho(t)
 	conn := connected(t, addr)
-	if rep, _ := request(t, conn, 1, ipv4Target(echo)); rep != 0 {
+	if rep, _ := request(t, conn, 1, ipTarget(echo)); rep != 0 {
 		t.Fatalf("reply = %d", rep)
 	}
 	if got := exchange(t, conn, []byte("hello"), 5); string(got) != "hello" {
 		t.Fatalf("echo = %q", got)
 	}
-	// half-close: remaining data still flows back, then eof propagates.
 	if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
 		t.Fatal(err)
 	}
@@ -375,14 +386,8 @@ func TestConnectEcho(t *testing.T) {
 
 // a client reset must end the session even when the upstream stays idle and never closes.
 func TestConnectResetClosesSession(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := make(logLines, 64)
-	cfg := allowAll()
-	cfg.Logger = slog.New(slog.NewTextHandler(lines, nil))
-	serve(t, ln, cfg)
+	cfg, lines := withLog(allowAll())
+	addr := start(t, cfg)
 
 	idle, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -398,26 +403,15 @@ func TestConnectResetClosesSession(t *testing.T) {
 		c.Close()
 	}()
 
-	conn := connected(t, ln.Addr().String())
-	if rep, _ := request(t, conn, 1, ipv4Target(netip.MustParseAddrPort(idle.Addr().String()))); rep != 0 {
+	conn := connected(t, addr)
+	if rep, _ := request(t, conn, 1, ipTarget(netip.MustParseAddrPort(idle.Addr().String()))); rep != 0 {
 		t.Fatalf("reply = %d", rep)
 	}
 	if err := conn.(*net.TCPConn).SetLinger(0); err != nil {
 		t.Fatal(err)
 	}
 	conn.Close()
-
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case line := <-lines:
-			if strings.Contains(line, "cmd=connect") {
-				return
-			}
-		case <-deadline:
-			t.Fatal("session did not end after client reset")
-		}
-	}
+	awaitLog(t, lines, "cmd=connect")
 }
 
 func TestConnectDomain(t *testing.T) {
@@ -434,12 +428,11 @@ func TestConnectDomain(t *testing.T) {
 
 func TestConnectRefused(t *testing.T) {
 	addr := start(t, allowAll())
-	// a freshly closed listener leaves a port nobody listens on.
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
 	closed := netip.MustParseAddrPort(ln.Addr().String())
 	ln.Close()
 	conn := connected(t, addr)
-	if rep, _ := request(t, conn, 1, ipv4Target(closed)); rep != 5 {
+	if rep, _ := request(t, conn, 1, ipTarget(closed)); rep != 5 {
 		t.Fatalf("reply = %d, want 5 (connection refused)", rep)
 	}
 }
@@ -448,7 +441,7 @@ func TestPrivateDestinationDenied(t *testing.T) {
 	addr := start(t, plain())
 	echo := tcpEcho(t)
 	conn := connected(t, addr)
-	if rep, _ := request(t, conn, 1, ipv4Target(echo)); rep != 2 {
+	if rep, _ := request(t, conn, 1, ipTarget(echo)); rep != 2 {
 		t.Fatalf("reply = %d, want 2 (not allowed)", rep)
 	}
 	conn = connected(t, addr)
@@ -460,7 +453,7 @@ func TestPrivateDestinationDenied(t *testing.T) {
 func TestBindRejected(t *testing.T) {
 	addr := start(t, allowAll())
 	conn := connected(t, addr)
-	if rep, _ := request(t, conn, 2, ipv4Target(netip.MustParseAddrPort("1.1.1.1:80"))); rep != 7 {
+	if rep, _ := request(t, conn, 2, ipTarget(netip.MustParseAddrPort("1.1.1.1:80"))); rep != 7 {
 		t.Fatalf("reply = %d, want 7 (command not supported)", rep)
 	}
 }
@@ -488,7 +481,8 @@ func TestNoAuthRejected(t *testing.T) {
 }
 
 func TestUDPAssociate(t *testing.T) {
-	addr := start(t, allowAll())
+	cfg, lines := withLog(allowAll())
+	addr := start(t, cfg)
 	echo := udpEcho(t)
 	conn := connected(t, addr)
 	client := udpClient(t)
@@ -497,7 +491,7 @@ func TestUDPAssociate(t *testing.T) {
 		t.Fatalf("relay address = %v", relay)
 	}
 
-	out := datagram(ipv4Target(echo), "dgram")
+	out := datagram(ipTarget(echo), "dgram")
 	send(t, client, out, relay)
 	payload, from := receive(t, client, echo)
 	if from != relay {
@@ -507,9 +501,9 @@ func TestUDPAssociate(t *testing.T) {
 		t.Fatalf("payload = %q", payload)
 	}
 
-	// closing the control connection tears the relay down; the write itself may already fail on a closed port.
+	// the write may already fail on the closed relay port.
 	conn.Close()
-	time.Sleep(100 * time.Millisecond)
+	awaitLog(t, lines, "cmd=udp")
 	_, _ = client.WriteToUDPAddrPort(out, relay)
 	expectNoReply(t, client)
 }
@@ -523,7 +517,7 @@ func TestUDPOnlyRelaysBetweenPeerAndContactedTargets(t *testing.T) {
 	client := udpClient(t)
 	clientPort := netip.MustParseAddrPort(client.LocalAddr().String()).Port()
 	hint := netip.AddrPortFrom(netip.MustParseAddr("10.1.2.3"), clientPort)
-	rep, relay := request(t, conn, 3, ipv4Target(hint))
+	rep, relay := request(t, conn, 3, ipTarget(hint))
 	if rep != 0 {
 		t.Fatalf("reply = %d", rep)
 	}
@@ -534,7 +528,7 @@ func TestUDPOnlyRelaysBetweenPeerAndContactedTargets(t *testing.T) {
 	if err := client.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	send(t, client, datagram(ipv4Target(echo), "real"), relay)
+	send(t, client, datagram(ipTarget(echo), "real"), relay)
 	if payload, _ := receive(t, client, echo); string(payload) != "real" {
 		t.Fatalf("payload = %q", payload)
 	}
@@ -560,7 +554,7 @@ func TestUDPPrivateDestinationDenied(t *testing.T) {
 	echo := udpEcho(t)
 	conn := connected(t, addr)
 	client := udpClient(t)
-	send(t, client, datagram(ipv4Target(echo), "x"), associate(t, conn))
+	send(t, client, datagram(ipTarget(echo), "x"), associate(t, conn))
 	expectNoReply(t, client)
 }
 
@@ -571,7 +565,7 @@ func TestUDPEgressFollowsDefaultRoute(t *testing.T) {
 	echo := udpServer(t, lan, func(_ []byte, from netip.AddrPort) []byte { return []byte(from.String()) })
 	conn := connected(t, addr)
 	client := udpClient(t)
-	send(t, client, datagram(ipv4Target(echo), "x"), associate(t, conn))
+	send(t, client, datagram(ipTarget(echo), "x"), associate(t, conn))
 	seen, _ := receive(t, client, echo)
 	if src := netip.MustParseAddrPort(string(seen)); src.Addr().Unmap() != lan {
 		t.Fatalf("target saw egress from %v, want %v", src, lan)
@@ -602,7 +596,7 @@ func TestUDPReplySourceMatchesAdvertisedAddress(t *testing.T) {
 	if relay.Addr() != lan {
 		t.Fatalf("relay advertised %v, want %v", relay, lan)
 	}
-	send(t, client, datagram(ipv4Target(echo), "x"), relay)
+	send(t, client, datagram(ipTarget(echo), "x"), relay)
 	if _, from := receive(t, client, echo); from != relay {
 		t.Fatalf("reply came from %v, want advertised %v", from, relay)
 	}
@@ -614,7 +608,7 @@ func TestUDPMappedIPv4Target(t *testing.T) {
 	conn := connected(t, addr)
 	client := udpClient(t)
 	mapped := netip.AddrPortFrom(netip.AddrFrom16(echo.Addr().As16()), echo.Port())
-	send(t, client, datagram(ipv6Target(mapped), "m"), associate(t, conn))
+	send(t, client, datagram(ipTarget(mapped), "m"), associate(t, conn))
 	if payload, _ := receive(t, client, echo); string(payload) != "m" {
 		t.Fatalf("payload = %q", payload)
 	}
@@ -640,7 +634,7 @@ func TestEgressIPv4Only(t *testing.T) {
 	echo6 := netip.MustParseAddrPort(ln6.Addr().String())
 
 	conn := connected(t, addr)
-	if rep, _ := request(t, conn, 1, ipv6Target(echo6)); rep != 8 {
+	if rep, _ := request(t, conn, 1, ipTarget(echo6)); rep != 8 {
 		t.Fatalf("ipv6 literal reply = %d, want 8 (address type not supported)", rep)
 	}
 	// localhost resolves to ::1 as well, but only 127.0.0.1 may be dialed and nothing listens there.
@@ -652,7 +646,7 @@ func TestEgressIPv4Only(t *testing.T) {
 	udp6 := udpServer(t, netip.IPv6Loopback(), func(p []byte, _ netip.AddrPort) []byte { return p })
 	conn = connected(t, addr)
 	client := udpClient(t)
-	send(t, client, datagram(ipv6Target(udp6), "x"), associate(t, conn))
+	send(t, client, datagram(ipTarget(udp6), "x"), associate(t, conn))
 	expectNoReply(t, client)
 }
 
@@ -668,7 +662,7 @@ func TestCancelClosesSessions(t *testing.T) {
 	go func() { done <- socks5.Serve(ctx, ln, cfg) }()
 
 	conn := connected(t, ln.Addr().String())
-	if rep, _ := request(t, conn, 1, ipv4Target(tcpEcho(t))); rep != 0 {
+	if rep, _ := request(t, conn, 1, ipTarget(tcpEcho(t))); rep != 0 {
 		t.Fatalf("reply = %d", rep)
 	}
 	cancel()

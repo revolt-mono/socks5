@@ -26,12 +26,9 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	allowPrivate := false
-	if v := os.Getenv("SOCKS5_ALLOW_PRIVATE"); v != "" {
-		var err error
-		if allowPrivate, err = strconv.ParseBool(v); err != nil {
-			return err
-		}
+	allowPrivate, err := strconv.ParseBool(cmp.Or(os.Getenv("SOCKS5_ALLOW_PRIVATE"), "false"))
+	if err != nil {
+		return err
 	}
 	cfg := socks5.Config{
 		Username:     os.Getenv("SOCKS5_USERNAME"),
