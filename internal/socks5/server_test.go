@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -288,6 +289,56 @@ func TestServeRequiresCredentials(t *testing.T) {
 	long := socks5.Config{Username: strings.Repeat("u", 256), Password: "p"}
 	if err := socks5.Serve(t.Context(), ln, long); err == nil {
 		t.Fatal("serve accepted a username longer than the wire format allows")
+	}
+}
+
+func TestServeRejectsInvalidAllowlist(t *testing.T) {
+	for _, list := range []string{"localhost", "127.0.0.1/32", "::1", "::ffff:127.0.0.1", "256.0.0.1", "127.0.0.1,", "127.0.0.1,,192.0.2.1", "127.0.0.1,invalid"} {
+		t.Run(list, func(t *testing.T) {
+			ln, err := net.Listen("tcp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			cfg := plain()
+			cfg.Allowlist = list
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			if err := socks5.Serve(ctx, ln, cfg); err == nil || !strings.Contains(err.Error(), "allowlist") {
+				t.Fatalf("serve with allowlist %q: %v", list, err)
+			}
+		})
+	}
+}
+
+func TestAllowlistAcceptsClient(t *testing.T) {
+	for _, list := range []string{"", " ", "192.0.2.1, 127.0.0.1 ,192.0.2.2"} {
+		t.Run(list, func(t *testing.T) {
+			cfg := plain()
+			cfg.Allowlist = list
+			connected(t, start(t, cfg))
+		})
+	}
+}
+
+func TestAllowlistClosesClientWithoutReply(t *testing.T) {
+	for name, greeting := range map[string][]byte{
+		"idle":            nil,
+		"socks5 greeting": {5, 1, 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := plain()
+			cfg.Allowlist = "192.0.2.1"
+			conn := dial(t, start(t, cfg))
+			if len(greeting) > 0 {
+				// The server may close before the greeting reaches the socket.
+				_, _ = conn.Write(greeting)
+			}
+			n, err := conn.Read(make([]byte, 2))
+			if n != 0 || (!errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET)) {
+				t.Fatalf("blocked client received %d bytes, error %v; want immediate close without a reply", n, err)
+			}
+		})
 	}
 }
 

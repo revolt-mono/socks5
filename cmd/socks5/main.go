@@ -1,5 +1,6 @@
 // Command socks5 runs the proxy configured from environment variables:
 // SOCKS5_LISTEN (default 0.0.0.0:5000), SOCKS5_USERNAME, SOCKS5_PASSWORD,
+// SOCKS5_ALLOWLIST (comma-separated ipv4 client addresses; empty allows all),
 // SOCKS5_ALLOW_PRIVATE (default false).
 package main
 
@@ -35,6 +36,7 @@ func run(log *slog.Logger) error {
 	cfg := socks5.Config{
 		Username:     os.Getenv("SOCKS5_USERNAME"),
 		Password:     os.Getenv("SOCKS5_PASSWORD"),
+		Allowlist:    os.Getenv("SOCKS5_ALLOWLIST"),
 		AllowPrivate: allowPrivate,
 		Logger:       log,
 	}

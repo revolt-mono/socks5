@@ -5,8 +5,11 @@ package socks5
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,6 +22,8 @@ const (
 type Config struct {
 	Username string
 	Password string
+	// Allowlist is a comma-separated list of ipv4 client addresses; empty allows all.
+	Allowlist string
 	// AllowPrivate permits private, loopback, and link-local destinations.
 	AllowPrivate bool
 	Logger       *slog.Logger
@@ -30,8 +35,6 @@ type server struct {
 }
 
 // Serve accepts socks5 clients on ln until ctx is cancelled, then closes the listener and every active session before returning.
-// Transient accept errors are retried with backoff; Serve returns early only if ln is closed by the caller.
-// Each session is logged once when it ends.
 // ln must be an ipv4 listener: udp relays are ipv4 sockets advertised on the address the control connection arrived on.
 func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 	if cfg.Username == "" || cfg.Password == "" {
@@ -39,6 +42,16 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 	}
 	if len(cfg.Username) > maxCredentialLen || len(cfg.Password) > maxCredentialLen {
 		return errors.New("socks5: username and password must be at most 255 bytes")
+	}
+	clients := make(map[netip.Addr]bool)
+	if strings.TrimSpace(cfg.Allowlist) != "" {
+		for entry := range strings.SplitSeq(cfg.Allowlist, ",") {
+			ip, err := netip.ParseAddr(strings.TrimSpace(entry))
+			if err != nil || !ip.Is4() {
+				return fmt.Errorf("socks5: allowlist entry %q must be an ipv4 address", entry)
+			}
+			clients[ip] = true
+		}
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -69,6 +82,10 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 			continue
 		}
 		delay = 0
+		if len(clients) > 0 && !clients[addressFrom(conn.RemoteAddr()).ip] {
+			conn.Close()
+			continue
+		}
 		wg.Go(func() { s.handle(ctx, conn) })
 	}
 }
