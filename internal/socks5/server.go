@@ -61,7 +61,7 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 	s.dialer = net.Dialer{Timeout: handshakeTimeout, ControlContext: s.control}
 	cfg.Logger.Info("listening", "addr", ln.Addr().String(), "allow_private", cfg.AllowPrivate)
 
-	defer context.AfterFunc(ctx, func() { ln.Close() })()
+	defer context.AfterFunc(ctx, func() { _ = ln.Close() })()
 	var wg sync.WaitGroup
 	var delay time.Duration
 	for {
@@ -84,7 +84,7 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 		}
 		delay = 0
 		if len(clients) > 0 && !clients[addrPort(conn.RemoteAddr()).Addr()] {
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 		wg.Go(func() { s.handle(ctx, conn) })

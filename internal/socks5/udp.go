@@ -32,8 +32,8 @@ func (s *server) udpAssociate(ctx context.Context, sess *session, dst address) e
 	}
 	go func() {
 		_, _ = io.Copy(io.Discard, conn)
-		front.Close()
-		back.Close()
+		_ = front.Close()
+		_ = back.Close()
 	}()
 
 	r := &udpRelay{
@@ -48,13 +48,14 @@ func (s *server) udpAssociate(ctx context.Context, sess *session, dst address) e
 	var wg sync.WaitGroup
 	wg.Go(func() { sess.down = r.relayReplies(back, front) })
 	sess.up, err = r.forward(ctx, front, back)
-	back.Close()
+	_ = back.Close()
 	wg.Wait()
 	return err
 }
 
 type udpRelay struct {
 	*server
+
 	peer netip.Addr
 
 	// mu guards what forward shares with relayReplies.

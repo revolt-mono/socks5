@@ -27,7 +27,7 @@ type session struct {
 
 func (s *server) handle(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
-	defer context.AfterFunc(ctx, func() { conn.Close() })()
+	defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
 
 	start := time.Now()
 	sess := &session{conn: conn}

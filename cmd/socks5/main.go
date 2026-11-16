@@ -38,11 +38,11 @@ func run(log *slog.Logger) error {
 		Logger:       log,
 	}
 
-	ln, err := net.Listen("tcp4", cmp.Or(os.Getenv("SOCKS5_LISTEN"), "0.0.0.0:5000"))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ln, err := new(net.ListenConfig).Listen(ctx, "tcp4", cmp.Or(os.Getenv("SOCKS5_LISTEN"), "0.0.0.0:5000"))
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	return socks5.Serve(ctx, ln, cfg)
 }

@@ -16,7 +16,7 @@ func (s *server) connect(ctx context.Context, sess *session, dst address) error 
 		return errors.Join(err, writeReply(conn, replyCode(err), netip.AddrPort{}))
 	}
 	defer remote.Close()
-	defer context.AfterFunc(ctx, func() { remote.Close() })()
+	defer context.AfterFunc(ctx, func() { _ = remote.Close() })()
 
 	if err := writeReply(conn, repSucceeded, addrPort(remote.LocalAddr())); err != nil {
 		return err
@@ -33,14 +33,14 @@ func (s *server) connect(ctx context.Context, sess *session, dst address) error 
 func pipe(src, dst net.Conn) int64 {
 	n, err := io.Copy(dst, src)
 	if err != nil {
-		src.Close()
-		dst.Close()
+		_ = src.Close()
+		_ = dst.Close()
 		return n
 	}
 	if hc, ok := dst.(interface{ CloseWrite() error }); ok {
 		_ = hc.CloseWrite()
 	} else {
-		dst.Close()
+		_ = dst.Close()
 	}
 	return n
 }

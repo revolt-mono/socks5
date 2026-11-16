@@ -1,63 +1,171 @@
 version: "2"
 
-linters:
-  default: standard
-  enable:
-    - asasalint
-    - bidichk
-    - copyloopvar
-    - durationcheck
-    - errorlint
-    - exhaustive
-    - fatcontext
-    - gocritic
-    - gosec
-    - intrange
-    - misspell
-    - modernize
-    - nilerr
-    - nilnesserr
-    - nolintlint
-    - perfsprint
-    - predeclared
-    - reassign
-    - revive
-    - sloglint
-    - thelper
-    - unconvert
-    - unparam
-    - usestdlibvars
-    - usetesting
-    - wastedassign
-    - whitespace
-  settings:
-    errcheck:
-      exclude-functions:
-        - (net.Conn).Close
-        - (net.Listener).Close
-        - (*net.conn).Close
-    gocritic:
-      enabled-tags:
-        - diagnostic
-        - performance
-        - style
-    gosec:
-      excludes:
-        - G104 # errcheck owns unchecked errors
-    nolintlint:
-      require-explanation: true
-      require-specific: true
-  exclusions:
-    rules:
-      - path: _test\.go
-        linters:
-          - gosec
+issues:
+  max-same-issues: 50
 
 formatters:
   enable:
-    - gofumpt
     - goimports
   settings:
     goimports:
       local-prefixes:
         - github.com/revolt-mono/socks5
+
+linters:
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - canonicalheader
+    - cyclop
+    - depguard
+    - dupl
+    - durationcheck
+    - embeddedstructfieldcheck
+    - errcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - forbidigo
+    - funcorder
+    - gocheckcompilerdirectives
+    - gochecknoinits
+    - gocritic
+    - godoclint
+    - godot
+    - gomoddirectives
+    - goprintffuncname
+    - gosec
+    - govet
+    - iface
+    - ineffassign
+    - iotamixing
+    - makezero
+    - mirror
+    - modernize
+    - musttag
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nosprintfhostport
+    - paralleltest
+    - perfsprint
+    - predeclared
+    - reassign
+    - revive
+    - rowserrcheck
+    - sloglint
+    - sqlclosecheck
+    - staticcheck
+    - testableexamples
+    - testpackage
+    - tparallel
+    - unconvert
+    - unparam
+    - unqueryvet
+    - unused
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
+
+  settings:
+    cyclop:
+      max-complexity: 30
+      package-average: 10.0
+
+    depguard:
+      rules:
+        "non-test files":
+          files:
+            - "!$test"
+          deny:
+            - pkg: math/rand$
+              desc: Use math/rand/v2 instead, see https://go.dev/blog/randv2
+        "all files":
+          deny:
+            - pkg: log$
+              desc: Use log/slog instead, see https://go.dev/blog/slog
+
+    embeddedstructfieldcheck:
+      forbid-mutex: true
+
+    funcorder:
+      struct-method: false
+
+    gocritic:
+      settings:
+        captLocal:
+          paramsOnly: false
+        underef:
+          skipRecvDeref: false
+
+    godoclint:
+      enable:
+        - no-unused-link
+      disable:
+        - start-with-name
+
+    gosec:
+      excludes:
+        - G115
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+
+    nakedret:
+      max-func-lines: 0
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    perfsprint:
+      strconcat: false
+
+    reassign:
+      patterns:
+        - ".*"
+
+    sloglint:
+      no-global: all
+
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -QF1008
+
+    usetesting:
+      os-temp-dir: true
+
+  exclusions:
+    warn-unused: true
+    presets:
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - text: 'should have a package comment'
+        linters: [revive]
+      - text: 'exported \S+ \S+ should have comment( \(or a comment on this block\))? or be unexported'
+        linters: [revive]
+      - text: 'comment on exported \S+ \S+ should be of the form'
+        linters: [revive]
+      - path: '_test\.go'
+        linters:
+          - bodyclose
+          - gosec
+          - noctx

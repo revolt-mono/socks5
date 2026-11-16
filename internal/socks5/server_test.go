@@ -250,6 +250,7 @@ func lanIPv4(t *testing.T) netip.Addr {
 
 type flakyListener struct {
 	net.Listener
+
 	failed bool
 }
 
@@ -291,6 +292,7 @@ func awaitLog(t *testing.T, lines logLines, want string) {
 }
 
 func TestServeRequiresCredentials(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -306,8 +308,10 @@ func TestServeRequiresCredentials(t *testing.T) {
 }
 
 func TestServeRejectsInvalidAllowlist(t *testing.T) {
+	t.Parallel()
 	for _, list := range []string{"localhost", "127.0.0.1/32", "::1", "::ffff:127.0.0.1", "256.0.0.1", "127.0.0.1,", "127.0.0.1,,192.0.2.1", "127.0.0.1,invalid"} {
 		t.Run(list, func(t *testing.T) {
+			t.Parallel()
 			ln, err := net.Listen("tcp4", "127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
@@ -325,8 +329,10 @@ func TestServeRejectsInvalidAllowlist(t *testing.T) {
 }
 
 func TestAllowlistAcceptsClient(t *testing.T) {
+	t.Parallel()
 	for _, list := range []string{"", " ", "192.0.2.1, 127.0.0.1 ,192.0.2.2"} {
 		t.Run(list, func(t *testing.T) {
+			t.Parallel()
 			cfg := plain()
 			cfg.Allowlist = list
 			connected(t, start(t, cfg))
@@ -335,11 +341,13 @@ func TestAllowlistAcceptsClient(t *testing.T) {
 }
 
 func TestAllowlistClosesClientWithoutReply(t *testing.T) {
+	t.Parallel()
 	for name, greeting := range map[string][]byte{
 		"idle":            nil,
 		"socks5 greeting": {5, 1, 2},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			cfg := plain()
 			cfg.Allowlist = "192.0.2.1"
 			conn := dial(t, start(t, cfg))
@@ -356,6 +364,7 @@ func TestAllowlistClosesClientWithoutReply(t *testing.T) {
 }
 
 func TestServeSurvivesAcceptError(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -368,6 +377,7 @@ func TestServeSurvivesAcceptError(t *testing.T) {
 }
 
 func TestConnectEcho(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	echo := tcpEcho(t)
 	conn := connected(t, addr)
@@ -387,6 +397,7 @@ func TestConnectEcho(t *testing.T) {
 
 // a client reset must end the session even when the upstream stays idle and never closes.
 func TestConnectResetClosesSession(t *testing.T) {
+	t.Parallel()
 	cfg, lines := withLog(allowAll())
 	addr := start(t, cfg)
 
@@ -416,6 +427,7 @@ func TestConnectResetClosesSession(t *testing.T) {
 }
 
 func TestConnectDomain(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	echo := tcpEcho(t)
 	conn := connected(t, addr)
@@ -428,6 +440,7 @@ func TestConnectDomain(t *testing.T) {
 }
 
 func TestConnectRefused(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
 	closed := netip.MustParseAddrPort(ln.Addr().String())
@@ -439,6 +452,7 @@ func TestConnectRefused(t *testing.T) {
 }
 
 func TestPrivateDestinationDenied(t *testing.T) {
+	t.Parallel()
 	addr := start(t, plain())
 	echo := tcpEcho(t)
 	conn := connected(t, addr)
@@ -452,6 +466,7 @@ func TestPrivateDestinationDenied(t *testing.T) {
 }
 
 func TestBindRejected(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	conn := connected(t, addr)
 	if rep, _ := request(t, conn, 2, ipTarget(netip.MustParseAddrPort("1.1.1.1:80"))); rep != 7 {
@@ -460,6 +475,7 @@ func TestBindRejected(t *testing.T) {
 }
 
 func TestBadPassword(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	conn := dial(t, addr)
 	if status := authenticate(t, conn, user, "wrong"); status == 0 {
@@ -471,6 +487,7 @@ func TestBadPassword(t *testing.T) {
 }
 
 func TestNoAuthRejected(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	conn := dial(t, addr)
 	if got := exchange(t, conn, []byte{5, 1, 0}, 2); !bytes.Equal(got, []byte{5, 0xFF}) {
@@ -482,6 +499,7 @@ func TestNoAuthRejected(t *testing.T) {
 }
 
 func TestUDPAssociate(t *testing.T) {
+	t.Parallel()
 	cfg, lines := withLog(allowAll())
 	addr := start(t, cfg)
 	echo := udpEcho(t)
@@ -512,6 +530,7 @@ func TestUDPAssociate(t *testing.T) {
 // the relay only talks to the authenticated peer: the ip in the client hint is ignored in favour of the peer ip,
 // and datagrams from sources the client never contacted are dropped instead of being forwarded to the client.
 func TestUDPOnlyRelaysBetweenPeerAndContactedTargets(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	echo := udpEcho(t)
 	conn := connected(t, addr)
@@ -537,6 +556,7 @@ func TestUDPOnlyRelaysBetweenPeerAndContactedTargets(t *testing.T) {
 
 // domain targets resolve once per association; every datagram for the name still reaches the target.
 func TestUDPDomainTarget(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	echo := udpEcho(t)
 	conn := connected(t, addr)
@@ -551,6 +571,7 @@ func TestUDPDomainTarget(t *testing.T) {
 }
 
 func TestUDPPrivateDestinationDenied(t *testing.T) {
+	t.Parallel()
 	addr := start(t, plain())
 	echo := udpEcho(t)
 	conn := connected(t, addr)
@@ -561,6 +582,7 @@ func TestUDPPrivateDestinationDenied(t *testing.T) {
 
 // egress must follow the default route even when the client reached the proxy through loopback: the target sees the host's lan ip.
 func TestUDPEgressFollowsDefaultRoute(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	lan := lanIPv4(t)
 	echo := udpServer(t, lan, func(_ []byte, from netip.AddrPort) []byte { return []byte(from.String()) })
@@ -575,6 +597,7 @@ func TestUDPEgressFollowsDefaultRoute(t *testing.T) {
 
 // replies must come from the advertised relay address even when the route back to the client would pick another local ip.
 func TestUDPReplySourceMatchesAdvertisedAddress(t *testing.T) {
+	t.Parallel()
 	lan := lanIPv4(t)
 	ln, err := net.Listen("tcp", net.JoinHostPort(lan.String(), "0"))
 	if err != nil {
@@ -604,6 +627,7 @@ func TestUDPReplySourceMatchesAdvertisedAddress(t *testing.T) {
 }
 
 func TestUDPMappedIPv4Target(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	echo := udpEcho(t)
 	conn := connected(t, addr)
@@ -617,6 +641,7 @@ func TestUDPMappedIPv4Target(t *testing.T) {
 
 // egress is ipv4 only: ipv6 literals are refused, names resolve to a records only, and udp datagrams for ipv6 targets are dropped.
 func TestEgressIPv4Only(t *testing.T) {
+	t.Parallel()
 	addr := start(t, allowAll())
 	ln6, err := net.Listen("tcp", "[::1]:0")
 	if err != nil {
@@ -652,6 +677,7 @@ func TestEgressIPv4Only(t *testing.T) {
 }
 
 func TestCancelClosesSessions(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
